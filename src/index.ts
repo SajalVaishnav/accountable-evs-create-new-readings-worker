@@ -14,20 +14,74 @@
  *
  * Learn more at https://developers.cloudflare.com/workers/
  */
+import { createClient } from '@supabase/supabase-js';
+import { Tables } from '@/database.types';
+import { getMeterCreditFromMeteridPassword } from '@/evs-crawler';
+import dotenv from 'dotenv';
+
+// Load environment variables from .env file
+dotenv.config();
 
 export default {
 	// The scheduled handler is invoked at the interval set in our wrangler.toml's
 	// [[triggers]] configuration.
-	async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
-		// A Cron Trigger can make requests to other endpoints on the Internet,
-		// publish to a Queue, query a D1 Database, and much more.
-		//
-		// We'll keep it simple and make an API call to a Cloudflare API:
-		let resp = await fetch('https://api.cloudflare.com/client/v4/ips');
-		let wasSuccessful = resp.ok ? 'success' : 'fail';
+	async scheduled(request: Request, env: Env) {
+		console.log('env', env)
+		// @ts-ignore
+		if(!env.SUPABASE_URL || !env.SUPABASE_KEY) {
+			throw new Error('Missing SUPABASE_URL or SUPABASE_KEY');
+		}
 
-		// You could store this result in KV, write to a D1 Database, or publish to a Queue.
-		// In this template, we'll just log the result:
-		console.log(`trigger fired at ${event.cron}: ${wasSuccessful}`);
+		// @ts-ignore
+		const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_KEY);
+
+		const startTime = new Date().toISOString();
+		console.log('Starting create-new-meter-readings-worker at', startTime);
+
+		const {
+			data: meters,
+			status: status,
+			statusText: statusText,
+			error: fetchMetersError,
+		} = await supabase
+			.from('Meter')
+			.select()
+			.gte('readingUpdatedAt', new Date(Date.now() - 86400000).toISOString())
+			.limit(100);
+
+		if (fetchMetersError || status !== 200 || !meters) {
+			console.error('Error fetching meters')
+			console.error('error: ', fetchMetersError);
+			console.error('status: ', statusText);
+			return new Response('Error fetching meters');
+		}
+
+		const promises = meters.map(async (meter: Tables<'Meter'>) => {
+			try {
+				const { meterId, password } = meter;
+				const reading = await getMeterCreditFromMeteridPassword(meterId, password); 
+				if (reading === undefined) {
+					throw new Error(`Failed fetching reading for meterId ${meterId}`);
+				}
+
+				const { status } = await supabase.from('MeterReadings').insert([{ meterId, reading }]);
+				if(status !== 201) {
+					throw new Error(`Failed creating MeterReading for meterId ${meterId}`);
+				}
+
+				console.log(`Successfully created MeterReading for meterId ${meterId}:`);
+			} catch (error) {
+				console.error(`Error creating MeterReading for meterId ${meter.meterId}:`, error);
+			}
+		});
+
+		await Promise.all(promises);
+
+		const endTime = new Date().toISOString();
+		console.log('Finished create-new-meter-readings-worker at', endTime);
+		const timeTaken = new Date(endTime).getTime() - new Date(startTime).getTime();
+		const message = `Finished create-new-meter-readings-worker in ${timeTaken} ms`;
+
+		return new Response(message);
 	},
 };
