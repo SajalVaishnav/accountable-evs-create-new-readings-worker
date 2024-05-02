@@ -17,22 +17,15 @@
 import { createClient } from '@supabase/supabase-js';
 import { Tables } from '@/database.types';
 import { getMeterCreditFromMeteridPassword } from '@/evs-crawler';
-import dotenv from 'dotenv';
-
-// Load environment variables from .env file
-dotenv.config();
 
 export default {
 	// The scheduled handler is invoked at the interval set in our wrangler.toml's
 	// [[triggers]] configuration.
 	async scheduled(request: Request, env: Env) {
-		console.log('env', env)
-		// @ts-ignore
 		if(!env.SUPABASE_URL || !env.SUPABASE_KEY) {
 			throw new Error('Missing SUPABASE_URL or SUPABASE_KEY');
 		}
 
-		// @ts-ignore
 		const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_KEY);
 
 		const startTime = new Date().toISOString();
@@ -69,7 +62,7 @@ export default {
 					throw new Error(`Failed creating MeterReading for meterId ${meterId}`);
 				}
 
-				console.log(`Successfully created MeterReading for meterId ${meterId}:`);
+				console.log(`Successfully created MeterReading for meterId ${meterId}`);
 			} catch (error) {
 				console.error(`Error creating MeterReading for meterId ${meter.meterId}:`, error);
 			}

@@ -170,3 +170,6 @@ dist
 
 .dev.vars
 .wrangler/
+
+# worker configuration file
+worker-configuration.d.ts
