@@ -21,8 +21,8 @@ import { getMeterCreditFromMeteridPassword } from '@/evs-crawler';
 export default {
 	// The scheduled handler is invoked at the interval set in our wrangler.toml's
 	// [[triggers]] configuration.
-	async scheduled(request: Request, env: Env) {
-		if(!env.SUPABASE_URL || !env.SUPABASE_KEY) {
+	async scheduled(event: ScheduledEvent, env: Env) {
+		if(!env.SUPABASE_URL || !env.SUPABASE_KEY || env.SUPABASE_URL === '' || env.SUPABASE_KEY === ''	) {
 			throw new Error('Missing SUPABASE_URL or SUPABASE_KEY');
 		}
 
@@ -39,14 +39,12 @@ export default {
 		} = await supabase
 			.from('Meter')
 			.select()
-			.gte('readingUpdatedAt', new Date(Date.now() - 86400000).toISOString())
+			.gte('readingUpdatedAt', new Date(Date.now() - 86400000).toISOString()) // 24 hours ago
 			.limit(100);
 
 		if (fetchMetersError || status !== 200 || !meters) {
-			console.error('Error fetching meters')
-			console.error('error: ', fetchMetersError);
-			console.error('status: ', statusText);
-			return new Response('Error fetching meters');
+			console.error('Failed fetching meters or no meters found: ', fetchMetersError, statusText);
+			return 
 		}
 
 		const promises = meters.map(async (meter: Tables<'Meter'>) => {
@@ -57,14 +55,14 @@ export default {
 					throw new Error(`Failed fetching reading for meterId ${meterId}`);
 				}
 
-				const { status } = await supabase.from('MeterReadings').insert([{ meterId, reading }]);
+				const { status, statusText } = await supabase.from('MeterReadings').insert([{ meterId, reading }]);
 				if(status !== 201) {
-					throw new Error(`Failed creating MeterReading for meterId ${meterId}`);
+					throw new Error(`Failed creating MeterReading for meterId ${meterId}: ${statusText}`);
 				}
 
 				console.log(`Successfully created MeterReading for meterId ${meterId}`);
 			} catch (error) {
-				console.error(`Error creating MeterReading for meterId ${meter.meterId}:`, error);
+				console.error(`Failed creating MeterReading for meterId ${meter.meterId}:`, error);
 			}
 		});
 
@@ -74,7 +72,5 @@ export default {
 		console.log('Finished create-new-meter-readings-worker at', endTime);
 		const timeTaken = new Date(endTime).getTime() - new Date(startTime).getTime();
 		const message = `Finished create-new-meter-readings-worker in ${timeTaken} ms`;
-
-		return new Response(message);
 	},
 };
